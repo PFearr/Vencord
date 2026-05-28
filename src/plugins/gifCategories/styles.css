@@ -1,0 +1,333 @@
+/* Overlay panel that covers the existing GIF/Sticker/Emoji content */
+.vc-gc-panel {
+    background: var(--background-base-low, var(--background-primary));
+    display: flex;
+    flex-direction: column;
+    inset: 0;
+    min-height: 0;
+    overflow: hidden;
+    position: absolute;
+    z-index: 5;
+}
+
+.vc-gc-panel-inner {
+    color: var(--text-normal);
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.vc-gc-header {
+    align-items: center;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+}
+
+.vc-gc-title {
+    color: var(--text-default, var(--header-primary));
+    flex: 1;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-gc-header-input {
+    background: var(--input-background);
+    border: 1px solid var(--input-border, transparent);
+    border-radius: 6px;
+    color: var(--text-default, #fff);
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+    padding: 6px 10px;
+}
+
+.vc-gc-header-input:focus {
+    border-color: var(--brand-500, #5865f2);
+}
+
+.vc-gc-confirm-label {
+    color: var(--text-default, #fff);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.vc-gc-icon-btn {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text-default, var(--header-primary, #fff));
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 20px;
+    font-weight: 700;
+    height: 32px;
+    justify-content: center;
+    line-height: 1;
+    min-width: 32px;
+    padding: 0 6px;
+}
+
+.vc-gc-icon-btn:hover,
+.vc-gc-icon-btn:focus-visible {
+    background: var(--background-modifier-hover);
+    color: var(--brand-500, #5865f2);
+}
+
+.vc-gc-icon-btn.vc-gc-danger:hover {
+    background: var(--button-danger-background);
+    color: var(--white-500, #fff);
+}
+
+.vc-gc-search {
+    align-items: center;
+    background: var(--input-background);
+    border-radius: 8px;
+    color: var(--text-muted);
+    display: flex;
+    flex: 0 0 auto;
+    gap: 8px;
+    margin: 10px 12px 0;
+    padding: 0 10px;
+}
+
+.vc-gc-search input {
+    background: transparent;
+    border: 0;
+    color: var(--text-normal);
+    flex: 1;
+    font-size: 14px;
+    outline: none;
+    padding: 8px 0;
+}
+
+.vc-gc-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+/* Categories tile grid */
+.vc-gc-cat-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vc-gc-cat-tile {
+    align-items: flex-start;
+    background-color: var(--background-secondary);
+    background-position: center;
+    background-size: cover;
+    border: 0;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 110px;
+    overflow: hidden;
+    padding: 12px;
+    position: relative;
+    text-align: left;
+    text-shadow:
+        0 1px 2px rgb(0 0 0 / 95%),
+        0 0 8px rgb(0 0 0 / 60%);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.vc-gc-cat-tile::before {
+    background: linear-gradient(180deg, rgb(0 0 0 / 15%) 0%, rgb(0 0 0 / 75%) 100%);
+    border-radius: inherit;
+    content: "";
+    inset: 0;
+    position: absolute;
+}
+
+.vc-gc-cat-tile > * {
+    position: relative;
+    z-index: 1;
+}
+
+.vc-gc-cat-tile:hover {
+    box-shadow: 0 0 0 2px var(--brand-500, #5865f2);
+    transform: scale(1.02);
+}
+
+.vc-gc-cat-name {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.vc-gc-cat-count {
+    align-self: flex-end;
+    background: rgb(0 0 0 / 70%);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+}
+
+.vc-gc-cat-tile-add {
+    align-items: center;
+    background-color: var(--brand-500, #5865f2);
+    color: #fff;
+    justify-content: center;
+    text-shadow: none;
+}
+
+.vc-gc-cat-tile-add::before {
+    display: none;
+}
+
+.vc-gc-cat-tile-add:hover {
+    background-color: var(--brand-560, #4752c4);
+    color: #fff;
+}
+
+.vc-gc-cat-tile-add .vc-gc-cat-name,
+.vc-gc-cat-tile-add span {
+    color: #fff;
+    text-shadow: none;
+}
+
+.vc-gc-plus {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+}
+
+.vc-gc-cat-tile-input {
+    cursor: default;
+    gap: 6px;
+}
+
+.vc-gc-cat-tile-input:hover {
+    transform: none;
+}
+
+.vc-gc-cat-tile-input input {
+    background: var(--input-background);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    color: var(--text-normal);
+    font-size: 13px;
+    outline: none;
+    padding: 6px 8px;
+    width: 100%;
+}
+
+.vc-gc-row {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+}
+
+.vc-gc-btn {
+    background: var(--button-secondary-background);
+    border: 0;
+    border-radius: 4px;
+    color: var(--text-normal);
+    cursor: pointer;
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 10px;
+}
+
+.vc-gc-btn:hover {
+    background: var(--button-secondary-background-hover);
+}
+
+.vc-gc-btn-primary {
+    background: var(--button-positive-background);
+    color: var(--white-500, #fff);
+}
+
+.vc-gc-btn-primary:hover {
+    background: var(--button-positive-background-hover);
+}
+
+.vc-gc-gif-grid {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vc-gc-gif {
+    background: var(--background-secondary);
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 0;
+    position: relative;
+}
+
+.vc-gc-gif img,
+.vc-gc-gif video {
+    display: block;
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.vc-gc-gif:hover {
+    outline: 2px solid var(--brand-500, #5865f2);
+}
+
+.vc-gc-gif-fallback {
+    align-items: center;
+    color: var(--text-muted);
+    display: flex;
+    font-size: 12px;
+    font-weight: 600;
+    inset: 0;
+    justify-content: center;
+    padding: 6px;
+    pointer-events: none;
+    position: absolute;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+.vc-gc-gif-error .vc-gc-gif-fallback {
+    background: var(--background-tertiary);
+    color: var(--text-default, #fff);
+}
+
+.vc-gc-gif-loading::after {
+    animation: vc-gc-pulse 1.4s ease-in-out infinite;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 6%), transparent);
+    content: "";
+    inset: 0;
+    position: absolute;
+}
+
+@keyframes vc-gc-pulse {
+    0%, 100% { opacity: 0.4; }
+    50%      { opacity: 1; }
+}
+
+.vc-gc-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 40px 20px;
+    text-align: center;
+}
