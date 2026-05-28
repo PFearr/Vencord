@@ -1,7 +1,7 @@
 # Vencord
 
 > [!IMPORTANT]  
-> While this **is a fork** of vencord. This fork is purley for the experinmentation and for plugins that me and my friends would use. You can take and use from it but do not expect it to be updated, be stable, or any support if it breaks. 
+> While this is a fork of Vencord, it is purely for experimentation and testing custom plugins for my friends and me. You are welcome to use it, but please do not expect regular updates, stability, or support if it breaks.
 
 
 ![](https://img.shields.io/github/package-json/v/Vendicated/Vencord?style=for-the-badge&logo=github&logoColor=d3869b&label=&color=1d2021&labelColor=282828)
