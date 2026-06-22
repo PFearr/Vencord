@@ -38,6 +38,18 @@ import {
 } from "@webpack/common";
 import type { Root } from "react-dom/client";
 
+const enum GridSize {
+    Compact = "compact",
+    Comfortable = "comfortable",
+    Large = "large"
+}
+
+const enum GifSort {
+    Recent = "recent",
+    Name = "name",
+    Wide = "wide"
+}
+
 const settings = definePluginSettings({
     sendOnSelect: {
         type: OptionType.BOOLEAN,
@@ -48,6 +60,15 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Close the expression picker after selecting a GIF.",
         default: true
+    },
+    gridSize: {
+        type: OptionType.SELECT,
+        description: "Default GIF grid density for the Categories tab.",
+        options: [
+            { label: "Compact", value: GridSize.Compact },
+            { label: "Comfortable", value: GridSize.Comfortable, default: true },
+            { label: "Large", value: GridSize.Large }
+        ]
     }
 });
 
@@ -65,6 +86,9 @@ const PANEL_ID = "vc-gc-panel";
 const STORE_KEY = "GifCategories_data_v1";
 const UNCATEGORIZED = "__uncategorized__";
 const ALL_FAVORITES = "__all__";
+const INITIAL_GIF_RENDER_COUNT = 24;
+const GIF_RENDER_BATCH_SIZE = 18;
+const GIF_MEDIA_ROOT_MARGIN = "650px 0px";
 
 interface CategoryData {
     order: string[];
@@ -73,6 +97,8 @@ interface CategoryData {
 
 let dataCache: CategoryData = { order: [], assignments: {} };
 const listeners = new Set<() => void>();
+const renderedGifCountCache = new Map<string, number>();
+const mediaStateCache = new Map<string, "loaded" | "error">();
 
 async function loadData() {
     const stored = await DataStore.get<CategoryData>(STORE_KEY);
@@ -272,12 +298,157 @@ async function assignGif(url: string, category: string | null) {
     await saveData();
 }
 
+async function clearCategory(name: string) {
+    const assignments = { ...dataCache.assignments };
+    for (const [url, category] of Object.entries(assignments)) {
+        if (category === name) delete assignments[url];
+    }
+    dataCache = { ...dataCache, assignments };
+    await saveData();
+}
+
+async function exportCategoryData() {
+    await copyText(JSON.stringify(dataCache, null, 2));
+}
+
+async function importCategoryData() {
+    const text = await navigator.clipboard?.readText?.();
+    if (!text) return;
+
+    let parsed: any;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        return;
+    }
+
+    if (!Array.isArray(parsed?.order) || !parsed.assignments || typeof parsed.assignments !== "object") return;
+
+    const order = [...dataCache.order];
+    for (const name of parsed.order) {
+        if (typeof name === "string" && name.trim() && !order.includes(name)) order.push(name);
+    }
+
+    const validCategories = new Set(order);
+    const assignments = { ...dataCache.assignments };
+    for (const [url, category] of Object.entries(parsed.assignments)) {
+        if (typeof url === "string" && typeof category === "string" && validCategories.has(category)) {
+            assignments[url] = category;
+        }
+    }
+
+    dataCache = { order, assignments };
+    await saveData();
+}
+
+function copyText(text: string) {
+    return navigator.clipboard?.writeText(text);
+}
+
+function openGifUrl(url: string) {
+    window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function randomGif(gifs: Gif[]) {
+    return gifs[Math.floor(Math.random() * gifs.length)];
+}
+
 function gifsInCategory(category: string, favorites: Gif[]): Gif[] {
     if (category === ALL_FAVORITES) return favorites;
     if (category === UNCATEGORIZED) {
         return favorites.filter(g => !dataCache.assignments[g.url]);
     }
     return favorites.filter(g => dataCache.assignments[g.url] === category);
+}
+
+function getGifListCacheKey(categoryName: string, query: string) {
+    return `${categoryName}\n${query.trim().toLowerCase()}`;
+}
+
+function useProgressiveGifList(gifs: Gif[], cacheKey: string) {
+    const observerRef = React.useRef<IntersectionObserver | null>(null);
+    const [visibleCount, setVisibleCount] = useState(() =>
+        Math.min(gifs.length, renderedGifCountCache.get(cacheKey) ?? INITIAL_GIF_RENDER_COUNT)
+    );
+
+    useEffect(() => {
+        setVisibleCount(Math.min(gifs.length, renderedGifCountCache.get(cacheKey) ?? INITIAL_GIF_RENDER_COUNT));
+    }, [cacheKey, gifs.length]);
+
+    useEffect(() => {
+        renderedGifCountCache.set(cacheKey, visibleCount);
+    }, [cacheKey, visibleCount]);
+
+    const loadMore = useCallback(() => {
+        setVisibleCount(count => Math.min(gifs.length, count + GIF_RENDER_BATCH_SIZE));
+    }, [gifs.length]);
+
+    const sentinelRef = useCallback((element: HTMLDivElement | null) => {
+        observerRef.current?.disconnect();
+        observerRef.current = null;
+        if (!element || visibleCount >= gifs.length) return;
+        if (!("IntersectionObserver" in window)) {
+            loadMore();
+            return;
+        }
+
+        observerRef.current = new IntersectionObserver(entries => {
+            if (entries.some(entry => entry.isIntersecting)) loadMore();
+        }, {
+            root: element.closest(".vc-gc-content"),
+            rootMargin: "250px 0px"
+        });
+
+        observerRef.current.observe(element);
+    }, [gifs.length, loadMore, visibleCount]);
+
+    useEffect(() => () => {
+        observerRef.current?.disconnect();
+    }, []);
+
+    return {
+        visibleGifs: gifs.slice(0, visibleCount),
+        visibleCount,
+        hasMore: visibleCount < gifs.length,
+        sentinelRef
+    };
+}
+
+function useNearViewport(rootMargin = GIF_MEDIA_ROOT_MARGIN) {
+    const observerRef = React.useRef<IntersectionObserver | null>(null);
+    const [isNearViewport, setNearViewport] = useState(false);
+
+    const ref = useCallback((element: Element | null) => {
+        observerRef.current?.disconnect();
+        observerRef.current = null;
+        if (!element || isNearViewport) return;
+        if (!("IntersectionObserver" in window)) {
+            setNearViewport(true);
+            return;
+        }
+
+        observerRef.current = new IntersectionObserver(entries => {
+            if (entries.some(entry => entry.isIntersecting)) {
+                setNearViewport(true);
+                observerRef.current?.disconnect();
+                observerRef.current = null;
+            }
+        }, {
+            root: element.closest(".vc-gc-content"),
+            rootMargin
+        });
+
+        observerRef.current.observe(element);
+    }, [isNearViewport, rootMargin]);
+
+    useEffect(() => () => {
+        observerRef.current?.disconnect();
+    }, []);
+
+    return [
+        ref,
+        isNearViewport
+    ] as const;
 }
 
 let observer: MutationObserver | undefined;
@@ -465,9 +636,16 @@ function CategoriesPanel({ onSelectGif }: { onSelectGif(gif: Gif): void; }) {
     const favorites = useFavorites();
     const [view, setView] = useState<{ kind: "categories"; } | { kind: "category"; name: string; }>({ kind: "categories" });
     const [query, setQuery] = useState("");
+    const [gridSize, setGridSize] = useState<GridSize>(() => settings.store.gridSize);
+    const [sort, setSort] = useState<GifSort>(GifSort.Recent);
+
+    const setGridPreset = useCallback((nextGridSize: GridSize) => {
+        settings.store.gridSize = nextGridSize;
+        setGridSize(nextGridSize);
+    }, []);
 
     return (
-        <div className="vc-gc-panel-inner">
+        <div className={`vc-gc-panel-inner vc-gc-grid-${gridSize}`}>
             <CategoryHeader
                 view={view}
                 onBack={() => setView({ kind: "categories" })}
@@ -487,6 +665,16 @@ function CategoriesPanel({ onSelectGif }: { onSelectGif(gif: Gif): void; }) {
                 />
             </div>
 
+            <PanelToolbar
+                view={view}
+                data={data}
+                favorites={favorites}
+                gridSize={gridSize}
+                sort={sort}
+                onGridSizeChange={setGridPreset}
+                onSortChange={setSort}
+            />
+
             <div className="vc-gc-content">
                 {view.kind === "categories" ? (
                     <CategoriesView
@@ -504,6 +692,7 @@ function CategoriesPanel({ onSelectGif }: { onSelectGif(gif: Gif): void; }) {
                         favorites={favorites}
                         data={data}
                         query={query}
+                        sort={sort}
                         onSelect={onSelectGif}
                     />
                 )}
@@ -555,6 +744,106 @@ const PlusIcon = () => (
         <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" />
     </svg>
 );
+
+const GridIcon = ({ columns }: { columns: number; }) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        {Array.from({ length: columns }).map((_, i) => {
+            const width = (18 - (columns - 1) * 2) / columns;
+            return <rect key={i} x={3 + i * (width + 2)} y="5" width={width} height="14" rx="1.5" fill="currentColor" />;
+        })}
+    </svg>
+);
+
+function categoryCount(favorites: Gif[], category: string) {
+    return gifsInCategory(category, favorites).length;
+}
+
+function PanelToolbar({
+    view,
+    data,
+    favorites,
+    gridSize,
+    sort,
+    onGridSizeChange,
+    onSortChange
+}: {
+    view: { kind: "categories"; } | { kind: "category"; name: string; };
+    data: CategoryData;
+    favorites: Gif[];
+    gridSize: GridSize;
+    sort: GifSort;
+    onGridSizeChange(gridSize: GridSize): void;
+    onSortChange(sort: GifSort): void;
+}) {
+    const uncategorizedCount = useMemo(
+        () => favorites.filter(g => !data.assignments[g.url]).length,
+        [data, favorites]
+    );
+    const currentCount = view.kind === "category"
+        ? categoryCount(favorites, view.name)
+        : data.order.length + 2;
+
+    return (
+        <div className="vc-gc-toolbar">
+            <div className="vc-gc-stats" aria-live="polite">
+                {view.kind === "category" ? (
+                    <>
+                        <strong>{currentCount}</strong>
+                        <span>GIFs</span>
+                    </>
+                ) : (
+                    <>
+                        <strong>{favorites.length}</strong>
+                        <span>favorites</span>
+                        <span className="vc-gc-dot" />
+                        <strong>{uncategorizedCount}</strong>
+                        <span>uncategorized</span>
+                    </>
+                )}
+            </div>
+
+            {view.kind === "category" && (
+                <select
+                    className="vc-gc-select"
+                    value={sort}
+                    aria-label="Sort GIFs"
+                    onChange={e => onSortChange(e.currentTarget.value as GifSort)}
+                >
+                    <option value={GifSort.Recent}>Recent</option>
+                    <option value={GifSort.Name}>Name</option>
+                    <option value={GifSort.Wide}>Wide first</option>
+                </select>
+            )}
+
+            <div className="vc-gc-segment" aria-label="Grid size">
+                <button
+                    type="button"
+                    className={gridSize === GridSize.Large ? "vc-gc-segment-active" : undefined}
+                    aria-label="Large grid"
+                    onClick={() => onGridSizeChange(GridSize.Large)}
+                >
+                    <GridIcon columns={1} />
+                </button>
+                <button
+                    type="button"
+                    className={gridSize === GridSize.Comfortable ? "vc-gc-segment-active" : undefined}
+                    aria-label="Comfortable grid"
+                    onClick={() => onGridSizeChange(GridSize.Comfortable)}
+                >
+                    <GridIcon columns={2} />
+                </button>
+                <button
+                    type="button"
+                    className={gridSize === GridSize.Compact ? "vc-gc-segment-active" : undefined}
+                    aria-label="Compact grid"
+                    onClick={() => onGridSizeChange(GridSize.Compact)}
+                >
+                    <GridIcon columns={3} />
+                </button>
+            </div>
+        </div>
+    );
+}
 
 function CategoryHeader({
     view,
@@ -708,49 +997,113 @@ function CategoriesView({
     };
 
     return (
-        <div className="vc-gc-cat-grid">
-            {tiles.map(tile => (
-                <button
-                    key={tile.id}
-                    type="button"
-                    className="vc-gc-cat-tile"
-                    style={tile.gifs[0]?.src ? { backgroundImage: `url(${tile.gifs[0].src})` } : undefined}
-                    onClick={() => onOpenCategory(tile.id)}
-                >
-                    <span className="vc-gc-cat-name">{tile.label}</span>
-                    <span className="vc-gc-cat-count">{tile.gifs.length}</span>
+        <>
+            <div className="vc-gc-gif-actions">
+                <button type="button" className="vc-gc-chip" onClick={exportCategoryData}>
+                    Backup
                 </button>
-            ))}
-
-            {adding ? (
-                <div className="vc-gc-cat-tile vc-gc-cat-tile-add vc-gc-cat-tile-input">
-                    <input
-                        autoFocus
-                        type="text"
-                        value={newName}
-                        placeholder="Category name"
-                        onChange={e => setNewName(e.currentTarget.value)}
-                        onKeyDown={e => {
-                            if (e.key === "Enter") submitNew();
-                            else if (e.key === "Escape") { setAdding(false); setNewName(""); }
+                <button type="button" className="vc-gc-chip" onClick={importCategoryData}>
+                    Restore
+                </button>
+                {query.trim() && !data.order.some(name => name.toLowerCase() === query.trim().toLowerCase()) && (
+                    <button
+                        type="button"
+                        className="vc-gc-chip vc-gc-chip-primary"
+                        onClick={async () => {
+                            await createCategory(query);
+                            setNewName("");
+                            setAdding(false);
                         }}
-                    />
-                    <div className="vc-gc-row">
-                        <button type="button" className="vc-gc-btn vc-gc-btn-primary" onClick={submitNew}>Add</button>
-                        <button type="button" className="vc-gc-btn" onClick={() => { setAdding(false); setNewName(""); }}>Cancel</button>
+                    >
+                        Create Search
+                    </button>
+                )}
+            </div>
+
+            <div className="vc-gc-cat-grid">
+                {tiles.map(tile => (
+                    <button
+                        key={tile.id}
+                        type="button"
+                        className="vc-gc-cat-tile"
+                        onClick={() => onOpenCategory(tile.id)}
+                        onContextMenu={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            ContextMenuApi.openContextMenu(e, () => (
+                                <CategoryContextMenu category={tile.id} label={tile.label} gifs={tile.gifs} />
+                            ));
+                        }}
+                    >
+                        <CategoryPreview gifs={tile.gifs} />
+                        <span className="vc-gc-cat-name">{tile.label}</span>
+                        <span className="vc-gc-cat-count">{tile.gifs.length}</span>
+                    </button>
+                ))}
+
+                {adding ? (
+                    <div className="vc-gc-cat-tile vc-gc-cat-tile-add vc-gc-cat-tile-input">
+                        <input
+                            autoFocus
+                            type="text"
+                            value={newName}
+                            placeholder="Category name"
+                            onChange={e => setNewName(e.currentTarget.value)}
+                            onKeyDown={e => {
+                                if (e.key === "Enter") submitNew();
+                                else if (e.key === "Escape") { setAdding(false); setNewName(""); }
+                            }}
+                        />
+                        <div className="vc-gc-row">
+                            <button type="button" className="vc-gc-btn vc-gc-btn-primary" onClick={submitNew}>Add</button>
+                            <button type="button" className="vc-gc-btn" onClick={() => { setAdding(false); setNewName(""); }}>Cancel</button>
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <button
-                    type="button"
-                    className="vc-gc-cat-tile vc-gc-cat-tile-add"
-                    onClick={() => setAdding(true)}
-                >
-                    <span className="vc-gc-plus" aria-hidden><PlusIcon /></span>
-                    <span>New Category</span>
-                </button>
-            )}
-        </div>
+                ) : (
+                    <button
+                        type="button"
+                        className="vc-gc-cat-tile vc-gc-cat-tile-add"
+                        onClick={() => setAdding(true)}
+                    >
+                        <span className="vc-gc-plus" aria-hidden><PlusIcon /></span>
+                        <span>New Category</span>
+                    </button>
+                )}
+            </div>
+        </>
+    );
+}
+
+function CategoryPreview({ gifs }: { gifs: Gif[]; }) {
+    const [previewRef, isNearViewport] = useNearViewport("350px 0px");
+    const previewGifs = gifs.slice(0, 4);
+
+    if (!previewGifs.length || !isNearViewport) {
+        return <span ref={previewRef} className="vc-gc-cat-preview vc-gc-cat-preview-empty" aria-hidden />;
+    }
+
+    return (
+        <span ref={previewRef} className={`vc-gc-cat-preview vc-gc-cat-preview-${previewGifs.length}`} aria-hidden>
+            {previewGifs.map(gif => {
+                const isVideo = isVideoSrc(gif.src, gif.format);
+                return (
+                    <span key={gif.url} className="vc-gc-cat-preview-cell">
+                        {isVideo ? (
+                            <video
+                                src={gif.src}
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                                preload="metadata"
+                            />
+                        ) : (
+                            <img src={gif.src} alt="" loading="lazy" decoding="async" />
+                        )}
+                    </span>
+                );
+            })}
+        </span>
     );
 }
 
@@ -759,20 +1112,25 @@ function CategoryDetailView({
     favorites,
     data,
     query,
+    sort,
     onSelect
 }: {
     categoryName: string;
     favorites: Gif[];
     data: CategoryData;
     query: string;
+    sort: GifSort;
     onSelect(gif: Gif): void;
 }) {
     const gifs = useMemo(() => {
         const list = gifsInCategory(categoryName, favorites);
         const q = query.trim().toLowerCase();
-        if (!q) return list;
-        return list.filter(g => (g.url ?? "").toLowerCase().includes(q) || (g.src ?? "").toLowerCase().includes(q));
-    }, [categoryName, favorites, data, query]);
+        const filtered = q
+            ? list.filter(g => (g.url ?? "").toLowerCase().includes(q) || (g.src ?? "").toLowerCase().includes(q))
+            : list;
+        return sortGifs(filtered, sort);
+    }, [categoryName, favorites, data, query, sort]);
+    const { visibleGifs, visibleCount, hasMore, sentinelRef } = useProgressiveGifList(gifs, getGifListCacheKey(categoryName, `${sort}:${query}`));
 
     if (gifs.length === 0) {
         return (
@@ -787,16 +1145,24 @@ function CategoryDetailView({
     }
 
     return (
-        <div className="vc-gc-gif-grid">
-            {gifs.map(gif => (
-                <GifTile
-                    key={gif.url}
-                    gif={gif}
-                    currentCategory={categoryName}
-                    onSelect={onSelect}
-                />
-            ))}
-        </div>
+        <>
+            <GifQuickActions gifs={gifs} onSelect={onSelect} />
+            <div className="vc-gc-gif-grid">
+                {visibleGifs.map(gif => (
+                    <GifTile
+                        key={gif.url}
+                        gif={gif}
+                        currentCategory={categoryName}
+                        onSelect={onSelect}
+                    />
+                ))}
+                {hasMore && (
+                    <div ref={sentinelRef} className="vc-gc-gif-sentinel">
+                        Loading more GIFs... {visibleCount}/{gifs.length}
+                    </div>
+                )}
+            </div>
+        </>
     );
 }
 
@@ -817,6 +1183,73 @@ function gifLabel(url: string) {
     }
 }
 
+function sortGifs(gifs: Gif[], sort: GifSort) {
+    const sorted = [...gifs];
+    switch (sort) {
+        case GifSort.Name:
+            return sorted.sort((a, b) => gifLabel(a.url).localeCompare(gifLabel(b.url)));
+        case GifSort.Wide:
+            return sorted.sort((a, b) => {
+                const arA = a.width && a.height ? a.width / a.height : 1;
+                const arB = b.width && b.height ? b.width / b.height : 1;
+                return arB - arA;
+            });
+        case GifSort.Recent:
+        default:
+            return sorted.sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
+    }
+}
+
+function GifQuickActions({ gifs, onSelect }: { gifs: Gif[]; onSelect(gif: Gif): void; }) {
+    const pickRandom = useCallback(() => randomGif(gifs), [gifs]);
+
+    return (
+        <div className="vc-gc-gif-actions">
+            <button
+                type="button"
+                className="vc-gc-chip vc-gc-chip-primary"
+                disabled={gifs.length === 0}
+                onClick={() => {
+                    const gif = pickRandom();
+                    if (gif) onSelect(gif);
+                }}
+            >
+                Random
+            </button>
+            <button
+                type="button"
+                className="vc-gc-chip"
+                disabled={gifs.length === 0}
+                onClick={() => {
+                    const gif = pickRandom();
+                    if (gif) copyText(gif.url);
+                }}
+            >
+                Copy Random
+            </button>
+            <button
+                type="button"
+                className="vc-gc-chip"
+                disabled={gifs.length === 0}
+                onClick={() => copyText(gifs.map(g => g.url).join("\n"))}
+            >
+                Copy All
+            </button>
+            <button
+                type="button"
+                className="vc-gc-chip"
+                disabled={gifs.length === 0}
+                onClick={() => {
+                    const gif = pickRandom();
+                    if (gif) openGifUrl(gif.url);
+                }}
+            >
+                Open Random
+            </button>
+        </div>
+    );
+}
+
 function GifTile({
     gif,
     currentCategory,
@@ -827,9 +1260,20 @@ function GifTile({
     onSelect(gif: Gif): void;
 }) {
     const aspect = gif.width && gif.height ? gif.width / gif.height : 1;
-    const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
+    const [tileRef, isNearViewport] = useNearViewport();
+    const [state, setState] = useState<"loading" | "loaded" | "error">(() => mediaStateCache.get(gif.src) ?? "loading");
     const label = gifLabel(gif.url);
     const isVideo = isVideoSrc(gif.src, gif.format);
+    const shouldLoadMedia = isNearViewport || mediaStateCache.has(gif.src);
+
+    useEffect(() => {
+        setState(mediaStateCache.get(gif.src) ?? "loading");
+    }, [gif.src]);
+
+    const setCachedState = useCallback((nextState: "loaded" | "error") => {
+        mediaStateCache.set(gif.src, nextState);
+        setState(nextState);
+    }, [gif.src]);
 
     const onContextMenu = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
@@ -841,6 +1285,7 @@ function GifTile({
 
     return (
         <button
+            ref={tileRef}
             type="button"
             className={`vc-gc-gif vc-gc-gif-${state}`}
             style={{ aspectRatio: String(aspect) }}
@@ -849,25 +1294,28 @@ function GifTile({
             title={`${label} — click to send · right-click for options`}
             aria-label={label}
         >
-            {isVideo ? (
-                <video
-                    src={gif.src}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    preload="metadata"
-                    onLoadedData={() => setState("loaded")}
-                    onError={() => setState("error")}
-                />
-            ) : (
-                <img
-                    src={gif.src}
-                    alt={label}
-                    loading="lazy"
-                    onLoad={() => setState("loaded")}
-                    onError={() => setState("error")}
-                />
+            {shouldLoadMedia && (
+                isVideo ? (
+                    <video
+                        src={gif.src}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        preload="metadata"
+                        onLoadedData={() => setCachedState("loaded")}
+                        onError={() => setCachedState("error")}
+                    />
+                ) : (
+                    <img
+                        src={gif.src}
+                        alt={label}
+                        loading="lazy"
+                        decoding="async"
+                        onLoad={() => setCachedState("loaded")}
+                        onError={() => setCachedState("error")}
+                    />
+                )
             )}
             {state !== "loaded" && (
                 <span className="vc-gc-gif-fallback">
@@ -875,6 +1323,66 @@ function GifTile({
                 </span>
             )}
         </button>
+    );
+}
+
+function CategoryContextMenu({
+    category,
+    label,
+    gifs
+}: {
+    category: string;
+    label: string;
+    gifs: Gif[];
+}) {
+    const isUserCategory = category !== ALL_FAVORITES && category !== UNCATEGORIZED;
+
+    return (
+        <Menu.Menu
+            navId="vc-gc-category-menu"
+            onClose={ContextMenuApi.closeContextMenu}
+            aria-label="GIF category options"
+        >
+            <Menu.MenuItem
+                id="vc-gc-copy-category"
+                label={`Copy ${gifs.length} GIF URLs`}
+                disabled={gifs.length === 0}
+                action={() => copyText(gifs.map(g => g.url).join("\n"))}
+            />
+            {gifs[0] && (
+                <Menu.MenuItem
+                    id="vc-gc-copy-first"
+                    label="Copy cover GIF URL"
+                    action={() => copyText(gifs[0].url)}
+                />
+            )}
+            {gifs.length > 0 && (
+                <>
+                    <Menu.MenuItem
+                        id="vc-gc-copy-random-category"
+                        label="Copy random GIF URL"
+                        action={() => copyText(randomGif(gifs).url)}
+                    />
+                    <Menu.MenuItem
+                        id="vc-gc-open-random-category"
+                        label="Open random GIF"
+                        action={() => openGifUrl(randomGif(gifs).url)}
+                    />
+                </>
+            )}
+            {isUserCategory && (
+                <>
+                    <Menu.MenuSeparator />
+                    <Menu.MenuItem
+                        id="vc-gc-clear-category"
+                        label={`Clear "${label}"`}
+                        color="danger"
+                        disabled={gifs.length === 0}
+                        action={() => clearCategory(category)}
+                    />
+                </>
+            )}
+        </Menu.Menu>
     );
 }
 
@@ -897,7 +1405,22 @@ function GifContextMenu({
             <Menu.MenuItem
                 id="vc-gc-copy"
                 label="Copy GIF URL"
-                action={() => navigator.clipboard?.writeText(gif.url)}
+                action={() => copyText(gif.url)}
+            />
+            <Menu.MenuItem
+                id="vc-gc-copy-media"
+                label="Copy media URL"
+                action={() => copyText(gif.src)}
+            />
+            <Menu.MenuItem
+                id="vc-gc-copy-markdown"
+                label="Copy Markdown link"
+                action={() => copyText(`[${gifLabel(gif.url)}](${gif.url})`)}
+            />
+            <Menu.MenuItem
+                id="vc-gc-open"
+                label="Open GIF in browser"
+                action={() => openGifUrl(gif.url)}
             />
             <Menu.MenuSeparator />
             <Menu.MenuItem id="vc-gc-move" label={assigned ? `Move (current: ${assigned})` : "Add to category"}>
