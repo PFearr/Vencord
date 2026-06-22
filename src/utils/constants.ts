@@ -641,7 +641,7 @@ export const Devs = /* #__PURE__*/ Object.freeze({
     pfearr: {
         name: "PFearr",
         id: 147436995679879168n,
-    }
+    },
     nightmaresan: {
         name: "NightmareSan",
         id: 304239816466235392n
